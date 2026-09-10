@@ -1,0 +1,34 @@
+[package]
+name = "platform-bridge"
+version = "0.1.0"
+edition = "2021"
+
+# PyO3 wrappers around the Python sonic_platform plugin (Platform/Chassis/Sfp), so
+# the Rust daemon uses "the exact platform we have now" to talk to xcvr-emu. The
+# whole CMIS/SFF decode stack lives in sonic_platform_base and is driven by the
+# emulator Sfp's read_eeprom/write_eeprom/get_presence hooks; we expose the
+# high-level results (get_transceiver_info/_dom/_status, get_change_event, ...) to
+# Rust. This crate is ENVIRONMENT SCAFFOLDING the translation agents call into --
+# they never reimplement the platform, only the daemon logic on top of it.
+#
+# Builds only in the Debian-13 trixie container (python3-dev + libpython3.13-dev);
+# runs only inside pmon, where sonic_platform + xcvr-emu are importable. It cannot
+# build or run on the ARM64 Windows dev box (no libpython3.13).
+[lib]
+name = "platform_bridge"
+path = "src/lib.rs"
+
+# Standalone smoke test: construct the platform, list SFPs, print identity for
+# present modules, poll one change event. Proves the PyO3 -> sonic_platform spine
+# end to end on the live DUT.
+[[bin]]
+name = "bridge-smoke"
+path = "src/bin/bridge_smoke.rs"
+
+[dependencies]
+# auto-initialize embeds + starts the CPython interpreter on first GIL acquire
+# (this is an application embedding Python, not a Python extension module).
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"

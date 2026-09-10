@@ -1,0 +1,52 @@
+[package]
+name = "xcvrd-rs"
+version = "0.1.0"
+edition = "2021"
+
+# The daemon that replaces python xcvrd under the pmon supervisor, PLUS the
+# bootstrap library the ReCodeAgent translation pipeline builds on. Both
+# environment bindings are wired in as ordinary dependencies so agents can `use`
+# them directly and never re-solve interop:
+#   - platform-bridge : the Python sonic_platform HAL (xcvr-emu) via PyO3
+#   - swss-common     : STATE_DB (Redis) via the official sonic-net Rust bindings
+#
+# The default binary (src/main.rs) is the M0 skeleton (stays RUNNING under
+# supervisor). src/env.rs is the reusable seed (open_platform / open_state_db) the
+# agents grow into the real HAL/DB layer. examples/ are runnable demonstrations of
+# each binding and the combined read-transceiver-then-publish pattern; they are
+# built/run with `cargo build --examples` and are NOT part of the deployed daemon.
+
+[lib]
+name = "xcvrd_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "xcvrd-rs"
+path = "src/main.rs"
+
+[dependencies]
+platform-bridge = { path = "../platform-bridge" }
+# Pinned for reproducibility; keep in sync with tools/dut/Dockerfile.build's
+# SWSS_COMMON_REV (that clone supplies the c-api headers bindgen parses).
+swss-common = { git = "https://github.com/sonic-net/sonic-swss-common", rev = "7faca59cd30367692a8c5406ad5d7c0b5341c7ef" }
+# `preserve_order` keeps parsed JSON objects in insertion order (IndexMap), matching
+# Python dict semantics the media/optics SI parsers rely on: `is_si_per_speed_supported`
+# inspects the FIRST key, `get_media_settings_for_speed`/medium-lane matching return the
+# FIRST regex-matching key, and `CustomMediaSettingsParser.to_db_value` serialises the
+# custom attrs in file order (the golden `custom_serdes_attrs` JSON string is order-sensitive).
+serde_json = { version = "1", features = ["preserve_order"] }
+# Python-compatible regex (backtracking engine w/ lookaround) for the media/optics SI key
+# matching (`re.match`/`re.fullmatch` over vendor/media/lane-speed patterns — some
+# media_settings.json keys use negative lookahead, which the plain `regex` crate rejects).
+fancy-regex = "0.13"
+# The Rust swss-common binding exposes no `swsscommon.Select` (only per-table
+# `read_data`), but does expose each `SubscriberStateTable`'s fd via `get_fd()`.
+# `MultiPortChangeObserver` uses `libc::poll` over every subscriber fd to reproduce
+# the reference `Select` semantics (wake on ANY watched table). Already in the tree
+# transitively (pyo3 / swss-common); Cargo unifies to the resolved version.
+libc = "0.2"
+# Direct PyO3 access to the SAME embedded CPython interpreter platform-bridge starts
+# (kept in lock-step with platform-bridge's pin; Cargo unifies to one crate). Used only
+# by env::init_embedded_db_config to load the interpreter's swsscommon.SonicDBConfig so
+# the emulator Chassis can read the STATE_DB SFP-error injection hook — see that fn.
+pyo3 = { version = "0.22", features = ["auto-initialize"] }
